@@ -8,14 +8,7 @@ def equals(a: dict, b: dict):
 
 from lark import Lark, Transformer
 
-# statements: statement (NEWLINE* statement)*
 
-# ?statement: statement_type NEWLINE
-#   | statement_type $END
-
-# ?statement_type:  rel_expr
-# | set_definition
-# | rel_definition
 grammar = """
     ?start: statements
     statements: NEWLINE* terminated_statement* last_statement? -> statements_trans
@@ -438,14 +431,3 @@ rel R3 := R2
 set A := B * C
 set D := A
 """
-
-
-# def rel_def_def_trans(self, args):
-#     # Allows defining a relation with another definition.
-#     name, maybe_name = args
-#     expr = self.names.get_rel(maybe_name)
-#     if not expr:
-#         raise ValueError(
-#             f"No defined expression or domain codomain for {name} in relation definition body."
-#         )
-#     self.rel_def_trans([name, expr])
