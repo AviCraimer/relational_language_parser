@@ -9,8 +9,8 @@ Just got started on this. It is my first time writing a programming language so 
 
     - [ ] Fix parsing confusion between relations and sets for coproduct and product
     - [ ] Add converses and complements
-[x] - Define set expressions
-[x] - Define relational expressions
+- [x] Define set expressions
+- [x] Define relational expressions
 - [ ] Expand definitions statement
 - [ ] export statement
   - [ ] Compile exported statements to latex code
