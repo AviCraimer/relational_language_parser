@@ -4,19 +4,20 @@ Just got started on this. It is my first time writing a programming language so 
 
 ## Project Goals
 
-[] - Parse set expressions
-[] - Parse relational expressions
-    [] - Fix parsing confusion between relations and sets for coproduct and product
-    [] - Add converses and complements
+- [ ] Parse set expressions
+- [ ] Parse relational expressions
+
+    - [ ] Fix parsing confusion between relations and sets for coproduct and product
+    - [ ] Add converses and complements
 [x] - Define set expressions
 [x] - Define relational expressions
-[] - Expand definitions statement
-[] - export statement
-  [] - Compile exported statements to latex code
-[] - Functions to build expressions (taking set or relation expressions as arguments)
-[] - Basic Structural relations, Full, Empty, Copy, First, Second, Collapse, Left, Right
-[] - Defined Structural relations (standard library)
-[] - VSCode extension for syntax highlighting, error messages inline
+- [ ] Expand definitions statement
+- [ ] export statement
+  - [ ] Compile exported statements to latex code
+- [ ] Functions to build expressions (taking set or relation expressions as arguments)
+- [ ] Basic Structural relations, Full, Empty, Copy, First, Second, Collapse, Left, Right
+- [ ] Defined Structural relations (standard library)
+- [ ] VSCode extension for syntax highlighting, error messages inline
 
 
 ## Using vevn:
