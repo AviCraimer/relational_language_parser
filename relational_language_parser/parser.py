@@ -8,11 +8,30 @@ def equals(a: dict, b: dict):
 
 from lark import Lark, Transformer
 
+# statements: statement (NEWLINE* statement)*
 
+# ?statement: statement_type NEWLINE
+#   | statement_type $END
+
+# ?statement_type:  rel_expr
+# | set_definition
+# | rel_definition
 grammar = """
-    ?start: relation_expr
+    ?start: statements
+    statements: NEWLINE* terminated_statement* last_statement? -> statements_trans
 
-    ?relation_expr: rel_body (":" dom_cod)?  -> relation_expr_trans
+    ?terminated_statement: statement NEWLINE+ -> default_trans
+
+    ?last_statement: statement -> default_trans
+
+    ?statement: rel_expr
+            | set_definition
+            | rel_definition
+
+    set_definition: "set" IDENTIFIER ":=" set_expr  -> set_def_trans
+    rel_definition:  "rel" IDENTIFIER ":=" rel_expr -> rel_def_trans
+
+    ?rel_expr: rel_body (":" dom_cod)?  -> rel_expr_trans
 
     ?rel_body: rel_composed_level
 
@@ -31,11 +50,15 @@ grammar = """
     ?rel_parens: "(" rel_body ")"
 
     rel_atomic: IDENTIFIER ":" dom_cod   -> rel_atomic_trans
+            | IDENTIFIER -> rel_defined_trans
+
+
+
 
     dom_cod: set_expr "->" set_expr    -> dom_cod_trans
 
     // Set expressions with precedence
-    ?set_expr: set_coproduct
+    ?set_expr: set_coproduct -> set_expr_trans
 
     ?set_coproduct: set_product
            | set_coproduct "+" set_product   -> set_coproduct_trans
@@ -43,20 +66,95 @@ grammar = """
     ?set_product: set_atomic
                 | set_product "*" set_atomic  -> set_product_trans
 
-    ?set_atomic: IDENTIFIER  -> set_atomic_trans
+    ?set_atomic: set_name
                | "(" set_expr ")"
 
-    IDENTIFIER: /[a-zA-Z][a-zA-Z0-9_]*/
+    ?set_name: IDENTIFIER  -> set_atomic_trans
 
-    %import common.WS
+    IDENTIFIER: /[a-zA-Z_][a-zA-Z0-9_]*/
+
+    NEWLINE: /(\\r?\\n|\\r)/
+
+    WS: /[ \t]+/
     %ignore WS
+
 """
 
 
+class NamesContext:
+    def __init__(self):
+        self.set_definitions = {}  # def_name -> set_expr
+        self.rel_definitions = {}  # def_name -> rel_expr
+        self.used_names = set(["set", "rel"])  # all names (both defined and primitive)
+
+    def define_set(self, name: str, expr: dict):
+        if name in self.used_names:
+            raise ValueError(f"Name {name} already defined")
+        self.set_definitions[name] = expr
+        self.use_name(name)
+
+    def define_rel(self, name: str, expr: dict):
+        if name in self.used_names:
+            raise ValueError(f"Name {name} already defined")
+        self.rel_definitions[name] = expr
+        self.use_name(name)
+
+    def use_name(self, name: str):
+        self.used_names.add(name)
+        # Note: We don't check if the name is defined here
+        # because it might be a primitive name
+
+    def get_set(self, name: str) -> dict:
+        return self.set_definitions[name]
+
+    def get_rel(self, name: str) -> dict:
+        return self.rel_definitions[name]
+
+
 class ASTTransformer(Transformer):
-    def relation_expr_trans(self, args):
+
+    def __init__(self, names_context: NamesContext):
+        super().__init__()
+        self.names = names_context  # Pass in the context
+
+    def statements_trans(self, args):
+        return {
+            "type": "program",
+            "expr": [
+                {"type": "statement", "expr": arg} for arg in args if str(arg) != "\n"
+            ],
+        }
+
+    def default_trans(self, args):
+        return args[0]
+
+    def set_def_trans(self, args):
+        name, expr = args
+        name = str(name)
+        self.names.define_set(name, expr)
+        return {
+            "type": "definition",
+            "expr_type": "set",
+            "name": name,
+            "def_body": expr,
+        }
+
+    def rel_def_trans(self, args):
+        name, expr = args
+        name = str(name)
+        self.names.define_rel(name, expr)
+        return {
+            "type": "definition",
+            "expr_type": "relation",
+            "name": name,
+            "def_body": expr,
+        }
+
+    def rel_expr_trans(self, args):
         if len(args) == 1:
+            # Just return the relation when there's no explicit dom_cod
             return args[0]
+
         else:
             rel, outer_dom_cod = args
             if (
@@ -68,15 +166,40 @@ class ASTTransformer(Transformer):
                     f"Type mismatch: expression has type {rel['dom_cod']['domain']} -> {rel['dom_cod']['codomain']}, "
                     f"but was declared with type {outer_dom_cod['domain']} -> {outer_dom_cod['codomain']}"
                 )
+            # Strip the outer level which is not necessary in the AST
             return rel
 
     def rel_atomic_trans(self, args):
         rel, dom_cod = args
+        name = str(rel)
+        if name in self.names.rel_definitions:
+            expr = self.names.get_rel(name)
 
+            if not equals(dom_cod, expr["dom_cod"]):
+                raise ValueError(
+                    "Defined Relation has an explicit type annotation which does not match the definition."
+                )
+            return self.rel_defined_trans(name)
+        self.names.use_name(name)
         return {
-            "type": "rel_atomic",
-            "rel_name": str(rel),
+            "type": "relation",
+            "operation": "atomic",
+            "rel_name": name,
             "dom_cod": dom_cod,
+        }
+
+    def rel_defined_trans(self, args):
+        name = str(args[0])
+        if name not in self.names.rel_definitions:
+            raise ValueError(f"Undefined relation: {name}")
+        expr = self.names.get_rel(name)
+
+        # In the AST we store the dom_cod for type checking, but we don't store the definition since we can look it up as needed from the context.
+        return {
+            "type": "relation",
+            "operation": "defined",
+            "name": name,
+            "dom_cod": expr["dom_cod"],
         }
 
     def rel_composed_trans(self, args):
@@ -87,7 +210,8 @@ class ASTTransformer(Transformer):
                 f"Type mismatch in composition: {left['dom_cod']['codomain']} ≠ {right['dom_cod']['domain']}"
             )
         return {
-            "type": "relation_composition",
+            "type": "relation",
+            "operation": "composition",
             "left": left,
             "right": right,
             "dom_cod": {
@@ -99,17 +223,20 @@ class ASTTransformer(Transformer):
     def rel_coproduct_trans(self, args):
         left, right = args
         return {
-            "type": "rel_coproduct",
+            "type": "relation",
+            "operation": "coproduct",
             "left": left,
             "right": right,
             "dom_cod": {
                 "domain": {
-                    "type": "set_coproduct",
+                    "type": "set",
+                    "operation": "coproduct",
                     "left": left["dom_cod"]["domain"],
                     "right": right["dom_cod"]["domain"],
                 },
                 "codomain": {
-                    "type": "set_coproduct",
+                    "type": "set",
+                    "operation": "coproduct",
                     "left": left["dom_cod"]["codomain"],
                     "right": right["dom_cod"]["codomain"],
                 },
@@ -119,17 +246,20 @@ class ASTTransformer(Transformer):
     def rel_product_trans(self, args):
         left, right = args
         return {
-            "type": "rel_product",
+            "type": "relation",
+            "operation": "product",
             "left": left,
             "right": right,
             "dom_cod": {
                 "domain": {
-                    "type": "set_product",
+                    "type": "set",
+                    "operation": "product",
                     "left": left["dom_cod"]["domain"],
                     "right": right["dom_cod"]["domain"],
                 },
                 "codomain": {
-                    "type": "set_product",
+                    "type": "set",
+                    "operation": "product",
                     "left": left["dom_cod"]["codomain"],
                     "right": right["dom_cod"]["codomain"],
                 },
@@ -140,20 +270,33 @@ class ASTTransformer(Transformer):
         domain, codomain = args
         return {"type": "dom_cod", "domain": domain, "codomain": codomain}
 
+    def set_expr_trans(self, args):
+        return args[0]
+
     def set_atomic_trans(self, args):
-        return str(args[0])
+        name = str(args[0])
+        if name in self.names.set_definitions:
+            return {
+                "type": "set",
+                "operation": "defined",
+                "def_name": name,
+            }
+        else:
+            # In futuer I might want to prevent primitive set names from overlappign with primitive relation names. But for now I won't rule it out.
+            self.names.use_name(name)
+            return {"type": "set", "operation": "atomic", "name": str(args[0])}
 
     def set_coproduct_trans(self, args):
         left, right = args
-        return {"type": "set_coproduct", "left": left, "right": right}
+        return {"type": "set", "operation": "coproduct", "left": left, "right": right}
 
     def set_product_trans(self, args):
         left, right = args
-        return {"type": "set_product", "left": left, "right": right}
+        return {"type": "set", "operation": "product", "left": left, "right": right}
 
 
 def parse(text):
-    parser = Lark(grammar, parser="lalr", transformer=ASTTransformer())
+    parser = Lark(grammar, parser="lalr", transformer=ASTTransformer(NamesContext()))
     return parser.parse(text)
 
 
@@ -266,3 +409,43 @@ if __name__ == "__main__":
     test19 = "(R : A * B -> C + D) + (S : E * F -> G + H)"
     print("\nTest 19 (coproduct with complex types):", parse(test19))
     # Should have type (A*B + E*F) -> (C+D + G+H)
+
+    test20a = """
+
+    rel R := RR: A -> B
+
+    R: A -> B;S: B -> C
+    """
+    test20b = """
+
+    rel R := RR: A -> B
+
+    R;S: B -> C
+    """
+    print("test 20, defined relation")
+    parse20a = parse(test20a)
+    parse20b = parse(test20b)
+    print("Defined with explicit type", parse20a)
+    print("Defined no type", parse20b)
+    print("Match: ", equals(parse20a, parse20b))
+
+    test21 = (
+        test_definitions
+    ) = """
+rel R := S : A -> B
+rel R2 := R
+rel R3 := R2
+set A := B * C
+set D := A
+"""
+
+
+# def rel_def_def_trans(self, args):
+#     # Allows defining a relation with another definition.
+#     name, maybe_name = args
+#     expr = self.names.get_rel(maybe_name)
+#     if not expr:
+#         raise ValueError(
+#             f"No defined expression or domain codomain for {name} in relation definition body."
+#         )
+#     self.rel_def_trans([name, expr])
