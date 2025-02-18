@@ -1,5 +1,7 @@
 from deepdiff import DeepDiff
 from pprint import pprint
+from rellang.grammar import grammar
+from rellang.names_context import NamesContext
 
 
 def equals(a: dict, b: dict):
@@ -7,101 +9,6 @@ def equals(a: dict, b: dict):
 
 
 from lark import Lark, Transformer
-
-
-grammar = """
-    ?start: statements
-    statements: NEWLINE* terminated_statement* last_statement? -> statements_trans
-
-    ?terminated_statement: statement NEWLINE+ -> default_trans
-
-    ?last_statement: statement -> default_trans
-
-    ?statement: rel_expr
-            | set_definition
-            | rel_definition
-
-    set_definition: "set" IDENTIFIER ":=" set_expr  -> set_def_trans
-    rel_definition:  "rel" IDENTIFIER ":=" rel_expr -> rel_def_trans
-
-    ?rel_expr: rel_body (":" dom_cod)?  -> rel_expr_trans
-
-    ?rel_body: rel_composed_level
-
-    ?rel_composed_level: rel_coproduct_level
-                    | rel_composed_level ";" rel_coproduct_level  -> rel_composed_trans
-
-    ?rel_coproduct_level: rel_product_level
-                        | rel_coproduct_level "+" rel_product_level  -> rel_coproduct_trans
-
-    ?rel_product_level: rel_atomic_level
-                    | rel_product_level "*" rel_atomic_level  -> rel_product_trans
-
-    ?rel_atomic_level: rel_atomic
-                    | rel_parens
-
-    ?rel_parens: "(" rel_body ")"
-
-    rel_atomic: IDENTIFIER ":" dom_cod   -> rel_atomic_trans
-            | IDENTIFIER -> rel_defined_trans
-
-
-
-
-    dom_cod: set_expr "->" set_expr    -> dom_cod_trans
-
-    // Set expressions with precedence
-    ?set_expr: set_coproduct -> set_expr_trans
-
-    ?set_coproduct: set_product
-           | set_coproduct "+" set_product   -> set_coproduct_trans
-
-    ?set_product: set_atomic
-                | set_product "*" set_atomic  -> set_product_trans
-
-    ?set_atomic: set_name
-               | "(" set_expr ")"
-
-    ?set_name: IDENTIFIER  -> set_atomic_trans
-
-    IDENTIFIER: /[a-zA-Z_][a-zA-Z0-9_]*/
-
-    NEWLINE: /(\\r?\\n|\\r)/
-
-    WS: /[ \t]+/
-    %ignore WS
-
-"""
-
-
-class NamesContext:
-    def __init__(self):
-        self.set_definitions = {}  # def_name -> set_expr
-        self.rel_definitions = {}  # def_name -> rel_expr
-        self.used_names = set(["set", "rel"])  # all names (both defined and primitive)
-
-    def define_set(self, name: str, expr: dict):
-        if name in self.used_names:
-            raise ValueError(f"Name {name} already defined")
-        self.set_definitions[name] = expr
-        self.use_name(name)
-
-    def define_rel(self, name: str, expr: dict):
-        if name in self.used_names:
-            raise ValueError(f"Name {name} already defined")
-        self.rel_definitions[name] = expr
-        self.use_name(name)
-
-    def use_name(self, name: str):
-        self.used_names.add(name)
-        # Note: We don't check if the name is defined here
-        # because it might be a primitive name
-
-    def get_set(self, name: str) -> dict:
-        return self.set_definitions[name]
-
-    def get_rel(self, name: str) -> dict:
-        return self.rel_definitions[name]
 
 
 class ASTTransformer(Transformer):
